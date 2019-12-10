@@ -1,7 +1,7 @@
 #!/bin/sh
 OS_VERSION=`cat /etc/centos-release`
 CENTOS6='CentOS release 6.9 (Final)'
-USERNAME='centos'
+USERNAME=$1
 echo $OS_VERSION
 echo $CENTOS6
 echo $USERNAME
@@ -18,22 +18,13 @@ else
 	vim /etc/hostname
 fi
 
-echo '10.0.2.5 CentOS6
-10.0.2.4 CentOS7
+echo '10.0.2.4 CentOS6
+10.0.2.5 CentOS7
 10.0.2.6 CentOS7-1908' >> /etc/hosts
 cat /etc/hosts
 
-for i in `ls /home`
-do
-	test -d /home/$i || continue
-	chmod 755 /home/$i
-	mkdir -p /home/$i/www
-	mygroup=$(groups $i | awk '{print $3}')
-	chown -R $i:$mygroup /home/$i
-	chcon -R -t httpd_user_content_t /home/$i/www
-	chcon -t user_home_dir_t /home/$i
-done
-
+chmod 755 /home/$USERNAME
+mkdir -p /home/$USERNAME/www
 cd /home/$USERNAME/www
 touch test.php
 echo '<?php
@@ -66,12 +57,25 @@ mv phpMyAdmin-4.0.10.20-all-languages /home/$USERNAME/www/phpMyAdmin
 cd /home/$USERNAME/www/phpMyAdmin
 cp config.sample.inc.php config.inc.php
 
+cd /home/$USERNAME
 wget https://tw.wordpress.org/wordpress-5.1.3-zh_TW.tar.gz
-tar zxvf wordpress-5.1.3-zh_TW.tar.gz
+tar -zxvf wordpress-5.1.3-zh_TW.tar.gz
 mv wordpress /home/$USERNAME/www/
 cd /home/$USERNAME/www/wordpress
 cp wp-config-sample.php wp-config.php
-vim wp-config.php 
+vim wp-config.php
+echo "/** 設定 WordPress 變數和包含的檔案。 */
+require_once(ABSPATH . 'wp-settings.php');
+define('FS_METHOD','direct');
+define('FTP_BASE', '/www/');
+define('FTP_CONTENT_DIR', '/www/wordpress/wp-content/');
+define('FTP_PLUGIN_DIR', '/www/wordpress/wp-content/plugins/');
+define('FTP_THEMES_DIR ', '/www/wordpress/wp-content/themes/');
+/** Override default file permissions */
+if(is_admin()) {
+    add_filter('filesystem_method', create_function('$a', 'return "direct";' ));
+    define( 'FS_CHMOD_DIR', 0751 );
+}" >> wp-config.php
 
 if [ "$OS_VERSION" == "$CENTOS6" ];
 then
@@ -91,4 +95,16 @@ fi
 
 firewall-cmd --add-service=http --permanent
 firewall-cmd --reload
-setenforce 0
+
+setsebool -P httpd_can_network_connect 1
+setsebool -P httpd_can_network_connect_db 1
+setsebool -P httpd_enable_homedirs 1
+
+GROUP_NAME=$(groups $USERNAME | awk '{print $3}')
+echo $GROUP_NAME
+chown -R $USERNAME:$GROUP_NAME /home/$USERNAME
+chown -R apache:apache /home/$USERNAME/www/wordpress
+
+chcon -t user_home_dir_t /home/$USERNAME/
+chcon -R -t httpd_sys_content_t /home/$USERNAME/www/
+chcon -R -t httpd_sys_script_rw_t /home/$USERNAME/www/wordpress
